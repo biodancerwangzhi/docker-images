@@ -15,9 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ============================================
 # 1. 系统依赖
 # ============================================
-RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     cmake \
@@ -64,12 +62,11 @@ RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc |
     rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 3. 配置 R 镜像源（CRAN + Bioconductor 国内镜像）
+# 3. 配置 R 镜像源（CRAN + Bioconductor）
 # ============================================
 RUN mkdir -p /usr/lib/R/etc && \
     echo 'options( \
-  repos = c(CRAN = "https://mirrors.nju.edu.cn/CRAN"), \
-  BioC_mirror = "https://mirrors.nju.edu.cn/bioconductor", \
+  repos = c(CRAN = "https://cloud.r-project.org"), \
   download.file.method = "libcurl", \
   download.file.extra = "--retry 5 --retry-delay 3", \
   Ncpus = 4 \
@@ -120,10 +117,6 @@ ENV PATH="/opt/venv/bin:$PATH"
 # anndata 版本固定为 0.12.3，与 zellkonverter basilisk 环境一致
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-    -i https://mirror.nju.edu.cn/pypi/web/simple \
-    --trusted-host mirror.nju.edu.cn \
-    --timeout 120 \
-    --retries 5 \
     numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg
 
 # ============================================
@@ -135,12 +128,7 @@ RUN R -e "install.packages('remotes')" && \
 # ============================================
 # 8. easySCF (Python + R)
 # ============================================
-RUN pip install --no-cache-dir \
-    -i https://mirror.nju.edu.cn/pypi/web/simple \
-    --trusted-host mirror.nju.edu.cn \
-    --timeout 120 \
-    --retries 5 \
-    easySCFpy
+RUN pip install --no-cache-dir easySCFpy
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -206,12 +194,7 @@ RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
 # RUN pip install --no-cache-dir jupyter notebook matplotlib && \
 #     R -e "install.packages('IRkernel', repos='https://cloud.r-project.org')" && \
 #     R -e "IRkernel::installspec(user = FALSE)"
-RUN pip install --no-cache-dir \
-    -i https://mirror.nju.edu.cn/pypi/web/simple \
-    --trusted-host mirror.nju.edu.cn \
-    --timeout 120 \
-    --retries 5 \
-    jupyter notebook matplotlib
+RUN pip install --no-cache-dir jupyter notebook matplotlib
 
 # ============================================
 # 14. 验证安装
