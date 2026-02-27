@@ -4,10 +4,15 @@
 # 用于对比 CrossCell 与其他工具的性能
 # 包含: CrossCell, Zellkonverter, anndataR, convert2anndata, easySCF
 # ============================================
+# 编译流程：
+#   1. 在 dev 容器中编译: docker-compose run --rm dev cargo build --release
+#   2. 复制二进制: cp target/release/crosscell benchmark/
+#   3. 构建本镜像: docker-compose -f benchmark/docker-compose.benchmark.yml build
+# ============================================
 
 FROM ubuntu:22.04
 
-LABEL maintainer="biodancer"
+LABEL maintainer="CrossCell Contributors"
 LABEL description="Performance benchmark environment for single-cell data conversion tools"
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -53,6 +58,33 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
+# 1.5 安装 HDF5 1.14.6（crosscell 动态链接需要）
+# 注意：如果 crosscell 使用 --features hdf5-static 静态编译，
+# 则此步骤仅供 R/Python 工具（h5py, rhdf5, hdf5r）使用。
+# 静态二进制内置 HDF5 2.0.0，不依赖系统 libhdf5。
+# ============================================
+RUN cd /tmp && \
+    wget -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.6.tar.gz -O hdf5-1.14.6.tar.gz && \
+    tar xzf hdf5-1.14.6.tar.gz && \
+    cd hdf5-hdf5_1.14.6 && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DHDF5_BUILD_CPP_LIB=OFF \
+        -DHDF5_BUILD_FORTRAN=OFF \
+        -DHDF5_BUILD_JAVA=OFF \
+        -DHDF5_BUILD_TOOLS=ON \
+        -DHDF5_ENABLE_Z_LIB_SUPPORT=ON \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_STATIC_LIBS=OFF \
+        -DBUILD_TESTING=OFF && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf hdf5-hdf5_1.14.6 hdf5-1.14.6.tar.gz
+
+# ============================================
 # 2. 安装 R 4.5
 # ============================================
 RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | gpg --dearmor -o /usr/share/keyrings/r-project.gpg && \
@@ -62,7 +94,7 @@ RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc |
     rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 3. 配置 R 镜像源（CRAN + Bioconductor）
+# 3. 配置 R 镜像源（CRAN + Bioconductor 国内镜像）
 # ============================================
 RUN mkdir -p /usr/lib/R/etc && \
     echo 'options( \
@@ -114,7 +146,6 @@ RUN add-apt-repository -y ppa:deadsnakes/ppa && \
 RUN python3.12 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# anndata 版本固定为 0.12.3，与 zellkonverter basilisk 环境一致
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
     numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg
@@ -145,7 +176,6 @@ RUN R -e "install.packages('remotes')" && \
 
 # ============================================
 # 9. Zellkonverter + anndataR (Bioconductor)
-#    必须在所有其他 R 包之后安装，避免被依赖更新破坏
 # ============================================
 RUN R -e "BiocManager::install(c('zellkonverter', 'HDF5Array'), ask = FALSE, update = FALSE)" && \
     R -e "library(zellkonverter); cat('zellkonverter', as.character(packageVersion('zellkonverter')), 'OK\n')"
@@ -153,9 +183,8 @@ RUN R -e "BiocManager::install(c('zellkonverter', 'HDF5Array'), ask = FALSE, upd
 RUN R -e "BiocManager::install('anndataR', ask = FALSE, update = FALSE)" && \
     R -e "library(anndataR); cat('anndataR', as.character(packageVersion('anndataR')), 'OK\n')"
 
-
 # ============================================
-# 10. CrossCell 二进制文件
+# 10. CrossCell 二进制文件（从 dev 容器编译后复制）
 # ============================================
 COPY benchmark/crosscell /usr/local/bin/crosscell
 RUN chmod +x /usr/local/bin/crosscell
@@ -179,7 +208,6 @@ RUN PKGDIR=$(Rscript --slave -e "cat(system.file(package='zellkonverter'))") && 
     echo "Created symlink at ${PKGDIR}/basilisk/zellkonverterAnnDataEnv-0.12.3 -> /opt/venv" && \
     ls -la "${PKGDIR}/basilisk/"
 
-# anndata >= 0.11 默认禁止写 nullable strings
 RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
     echo '' >> "${ANNDATA_INIT}" && \
     echo '# Auto-enable nullable strings writing (patched by CrossCell benchmark)' >> "${ANNDATA_INIT}" && \
@@ -191,9 +219,6 @@ RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
 # ============================================
 # 13. 安装 Jupyter
 # ============================================
-# RUN pip install --no-cache-dir jupyter notebook matplotlib && \
-#     R -e "install.packages('IRkernel', repos='https://cloud.r-project.org')" && \
-#     R -e "IRkernel::installspec(user = FALSE)"
 RUN pip install --no-cache-dir jupyter notebook matplotlib
 
 # ============================================
