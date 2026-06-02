@@ -222,6 +222,11 @@ RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
 RUN pip install --no-cache-dir jupyter notebook matplotlib
 
 # ============================================
+# 13.5 安装 IRkernel (R kernel for Jupyter)
+# ============================================
+RUN R -e "install.packages('IRkernel'); IRkernel::installspec(user = FALSE)"
+
+# ============================================
 # 14. 验证安装
 # ============================================
 RUN echo "=== Verifying installations ===" && \
