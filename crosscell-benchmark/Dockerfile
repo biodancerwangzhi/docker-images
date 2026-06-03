@@ -1,19 +1,24 @@
 # ============================================
-# CrossCell Benchmark - Base Image
+# CrossCell Performance Benchmark Environment
 # ============================================
-# 最小化基础镜像：系统依赖 + R + Python + HDF5 + CrossCell
-# R/Python 工具包在服务器上手动安装测试后再固化到镜像中
+# 用于对比 CrossCell 与其他工具的性能
+# 包含: CrossCell, Zellkonverter, anndataR, convert2anndata, easySCF
+# ============================================
+# 编译流程：
+#   1. 在 dev 容器中编译: docker-compose run --rm dev cargo build --release
+#   2. 复制二进制: cp target/release/crosscell benchmark/
+#   3. 构建本镜像: docker-compose -f benchmark/docker-compose.benchmark.yml build
 # ============================================
 
 FROM ubuntu:22.04
 
 LABEL maintainer="CrossCell Contributors"
-LABEL description="CrossCell benchmark base environment"
+LABEL description="Performance benchmark environment for single-cell data conversion tools"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ============================================
-# 1. 系统依赖（全量，覆盖所有 R 包编译需求）
+# 1. 系统依赖（含 Seurat 编译所需的全部库）
 # ============================================
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -51,6 +56,7 @@ RUN apt-get update && apt-get install -y \
     libudunits2-dev \
     libgit2-dev \
     libfftw3-dev \
+    libuv1-dev \
     python3 \
     python3-pip \
     python3-dev \
@@ -104,7 +110,40 @@ RUN mkdir -p /usr/lib/R/etc && \
 )' >> /usr/lib/R/etc/Rprofile.site
 
 # ============================================
-# 5. Python 3.12 + venv
+# 5. R 基础包 + Bioconductor
+# ============================================
+RUN R -e "install.packages('BiocManager')"
+
+RUN R -e "BiocManager::install(c( \
+    'SingleCellExperiment', \
+    'SummarizedExperiment', \
+    'Biobase', \
+    'S4Vectors', \
+    'DelayedArray', \
+    'rhdf5' \
+), ask = FALSE, update = FALSE)"
+
+RUN R -e "install.packages(c( \
+    'Matrix', \
+    'arrow', \
+    'hdf5r', \
+    'devtools', \
+    'remotes', \
+    'jsonlite', \
+    'R6', \
+    'cli', \
+    'rlang' \
+))"
+
+# ============================================
+# 6. Seurat V5
+# ============================================
+RUN R -e "install.packages('Seurat', dependencies = TRUE)" && \
+    R -e "if (!requireNamespace('Seurat', quietly=TRUE)) quit(status=1, save='no')" && \
+    R -e "library(Seurat); cat('Seurat', as.character(packageVersion('Seurat')), 'OK\n')"
+
+# ============================================
+# 7. Python 3.12 + venv
 # ============================================
 RUN add-apt-repository -y ppa:deadsnakes/ppa && \
     apt-get update && \
@@ -116,34 +155,88 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-    numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg \
-    jupyter notebook matplotlib
+    numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg
 
 # ============================================
-# 6. CrossCell 二进制
+# 8. convert2anndata（重试两次）
+# ============================================
+RUN R -e "library(remotes); install_github('settylab/convert2anndata', upgrade = 'never')" || \
+    R -e "library(remotes); install_github('settylab/convert2anndata', upgrade = 'never')" || \
+    echo "WARNING: convert2anndata install failed after 2 attempts"
+
+# ============================================
+# 9. easySCF (Python + R)
+# ============================================
+RUN pip install --no-cache-dir easySCFpy || echo "WARNING: easySCFpy install failed"
+
+RUN R -e "library(remotes); install_url('https://github.com/xleizi/easySCF/archive/refs/heads/main.tar.gz', subdir='r')" || \
+    echo "WARNING: easySCFr install failed"
+
+# ============================================
+# 10. Zellkonverter + anndataR (Bioconductor)
+# ============================================
+RUN R -e "BiocManager::install(c('zellkonverter', 'HDF5Array'), ask = FALSE, update = FALSE)" && \
+    R -e "library(zellkonverter); cat('zellkonverter', as.character(packageVersion('zellkonverter')), 'OK\n')"
+
+RUN R -e "BiocManager::install('anndataR', ask = FALSE, update = FALSE)" && \
+    R -e "library(anndataR); cat('anndataR', as.character(packageVersion('anndataR')), 'OK\n')"
+
+# ============================================
+# 11. CrossCell 二进制
 # ============================================
 COPY benchmark/crosscell /usr/local/bin/crosscell
 RUN chmod +x /usr/local/bin/crosscell
 
 # ============================================
-# 7. 目录和环境变量
+# 12. 目录和环境变量
 # ============================================
 RUN mkdir -p /benchmark/scripts /benchmark/data /benchmark/results
 
 ENV BENCHMARK_DATA_DIR=/benchmark/data
 ENV BENCHMARK_RESULTS_DIR=/benchmark/results
 ENV R_LIBS_USER=/usr/local/lib/R/site-library
+ENV BASILISK_USE_SYSTEM_DIR=1
 
 # ============================================
-# 8. 验证基础环境
+# 13. 配置 basilisk (zellkonverter)
 # ============================================
-RUN echo "=== Verifying base environment ===" && \
+RUN PKGDIR=$(Rscript --slave -e "cat(system.file(package='zellkonverter'))") && \
+    mkdir -p "${PKGDIR}/basilisk" && \
+    ln -sf /opt/venv "${PKGDIR}/basilisk/zellkonverterAnnDataEnv-0.12.3" && \
+    echo "Created symlink at ${PKGDIR}/basilisk/zellkonverterAnnDataEnv-0.12.3 -> /opt/venv"
+
+# ============================================
+# 14. anndata nullable strings patch
+# ============================================
+RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
+    echo '' >> "${ANNDATA_INIT}" && \
+    echo '# Auto-enable nullable strings writing (patched by CrossCell benchmark)' >> "${ANNDATA_INIT}" && \
+    echo 'try:' >> "${ANNDATA_INIT}" && \
+    echo '    settings.allow_write_nullable_strings = True' >> "${ANNDATA_INIT}" && \
+    echo 'except: pass' >> "${ANNDATA_INIT}" && \
+    python3 -c "import anndata; print('allow_write_nullable_strings:', anndata.settings.allow_write_nullable_strings)"
+
+# ============================================
+# 15. Jupyter + IRkernel
+# ============================================
+RUN pip install --no-cache-dir jupyter notebook matplotlib
+
+RUN R -e "install.packages('IRkernel'); IRkernel::installspec(user = FALSE)"
+
+# ============================================
+# 16. 验证关键安装
+# ============================================
+RUN echo "=== Verifying CRITICAL installations ===" && \
     crosscell --version && \
-    R --version | head -1 && \
-    python3 --version && \
-    python3 -c "import anndata; print('anndata', anndata.__version__)" && \
-    jupyter --version | head -3 && \
-    echo "=== Base environment OK ==="
+    R -e "library(Seurat); cat('✅ Seurat', as.character(packageVersion('Seurat')), '\n')" && \
+    R -e "library(zellkonverter); cat('✅ zellkonverter', as.character(packageVersion('zellkonverter')), '\n')" && \
+    R -e "library(anndataR); cat('✅ anndataR', as.character(packageVersion('anndataR')), '\n')" && \
+    R -e "library(rhdf5); cat('✅ rhdf5', as.character(packageVersion('rhdf5')), '\n')" && \
+    jupyter kernelspec list && \
+    echo "=== Critical packages OK ===" && \
+    R -e "tryCatch(library(convert2anndata), error = function(e) cat('⚠ convert2anndata not available\n'))" && \
+    R -e "tryCatch(library(easySCFr), error = function(e) cat('⚠ easySCFr not available\n'))" && \
+    echo "=== All verifications complete ==="
 
 WORKDIR /benchmark
 
