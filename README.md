@@ -59,8 +59,8 @@ git push
 
 ```bash
 # 打 tag 触发对应镜像的构建和推送
-git tag crosscell-benchmark/v0.1.2
-git push origin crosscell-benchmark/v0.1.2
+git tag crosscell-benchmark/v1.0.1
+git push origin crosscell-benchmark/v1.0.1
 ```
 
 ### 新增镜像
