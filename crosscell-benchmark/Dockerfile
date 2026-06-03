@@ -135,7 +135,8 @@ RUN R -e "install.packages(c( \
 RUN R -e "install.packages(c('SeuratObject', 'sp', 'spam', 'dotCall64', 'sctransform', 'fastDummies', 'RcppAnnoy', 'RSpectra', 'RANN', 'RcppHNSW', 'leiden', 'uwot', 'irlba', 'future', 'future.apply', 'progressr', 'patchwork', 'cowplot', 'ggplot2', 'ggrepel', 'ggridges', 'lmtest'), dependencies = TRUE)"
 
 # 再装 Seurat 本体
-RUN R -e "install.packages('Seurat', dependencies = TRUE)" && \
+RUN R -e "options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/latest')); \
+          install.packages('Seurat', dependencies = TRUE)" && \
     R -e "library(Seurat); cat('Seurat', as.character(packageVersion('Seurat')), 'OK\n')"
 
 # ============================================
