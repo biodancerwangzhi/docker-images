@@ -1,24 +1,19 @@
 # ============================================
-# CrossCell Performance Benchmark Environment
+# CrossCell Benchmark - Base Image
 # ============================================
-# 用于对比 CrossCell 与其他工具的性能
-# 包含: CrossCell, Zellkonverter, anndataR, convert2anndata, easySCF
-# ============================================
-# 编译流程：
-#   1. 在 dev 容器中编译: docker-compose run --rm dev cargo build --release
-#   2. 复制二进制: cp target/release/crosscell benchmark/
-#   3. 构建本镜像: docker-compose -f benchmark/docker-compose.benchmark.yml build
+# 最小化基础镜像：系统依赖 + R + Python + HDF5 + CrossCell
+# R/Python 工具包在服务器上手动安装测试后再固化到镜像中
 # ============================================
 
 FROM ubuntu:22.04
 
 LABEL maintainer="CrossCell Contributors"
-LABEL description="Performance benchmark environment for single-cell data conversion tools"
+LABEL description="CrossCell benchmark base environment"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ============================================
-# 1. 系统依赖
+# 1. 系统依赖（全量，覆盖所有 R 包编译需求）
 # ============================================
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -50,6 +45,12 @@ RUN apt-get update && apt-get install -y \
     libbz2-dev \
     liblzma-dev \
     libwebp-dev \
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
+    libudunits2-dev \
+    libgit2-dev \
+    libfftw3-dev \
     python3 \
     python3-pip \
     python3-dev \
@@ -59,7 +60,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 1.5 安装 HDF5 1.14.6
+# 2. HDF5 1.14.6
 # ============================================
 RUN cd /tmp && \
     wget -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.6.tar.gz -O hdf5-1.14.6.tar.gz && \
@@ -83,7 +84,7 @@ RUN cd /tmp && \
     cd /tmp && rm -rf hdf5-hdf5_1.14.6 hdf5-1.14.6.tar.gz
 
 # ============================================
-# 2. 安装 R 4.5+
+# 3. R 4.5+
 # ============================================
 RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | gpg --dearmor -o /usr/share/keyrings/r-project.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/r-project.gpg] https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" > /etc/apt/sources.list.d/r-project.list && \
@@ -92,7 +93,7 @@ RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc |
     rm -rf /var/lib/apt/lists/*
 
 # ============================================
-# 3. 配置 R CRAN 镜像
+# 4. 配置 R CRAN 镜像
 # ============================================
 RUN mkdir -p /usr/lib/R/etc && \
     echo 'options( \
@@ -103,44 +104,7 @@ RUN mkdir -p /usr/lib/R/etc && \
 )' >> /usr/lib/R/etc/Rprofile.site
 
 # ============================================
-# 4. R 基础包 + Bioconductor
-# ============================================
-RUN R -e "install.packages('BiocManager')"
-
-RUN R -e "BiocManager::install(c( \
-    'SingleCellExperiment', \
-    'SummarizedExperiment', \
-    'Biobase', \
-    'S4Vectors', \
-    'DelayedArray', \
-    'rhdf5' \
-), ask = FALSE, update = FALSE)"
-
-RUN R -e "install.packages(c( \
-    'Matrix', \
-    'arrow', \
-    'hdf5r', \
-    'devtools', \
-    'remotes', \
-    'jsonlite', \
-    'R6', \
-    'cli', \
-    'rlang' \
-))"
-
-# ============================================
-# 5. Seurat V5（拆分安装确保成功）
-# ============================================
-# 先装 SeuratObject 和关键依赖
-RUN R -e "install.packages(c('SeuratObject', 'sp', 'spam', 'dotCall64', 'sctransform', 'fastDummies', 'RcppAnnoy', 'RSpectra', 'RANN', 'RcppHNSW', 'leiden', 'uwot', 'irlba', 'future', 'future.apply', 'progressr', 'patchwork', 'cowplot', 'ggplot2', 'ggrepel', 'ggridges', 'lmtest'), dependencies = TRUE)"
-
-# 再装 Seurat 本体
-RUN R -e "options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/latest')); \
-          install.packages('Seurat', dependencies = TRUE)" && \
-    R -e "library(Seurat); cat('Seurat', as.character(packageVersion('Seurat')), 'OK\n')"
-
-# ============================================
-# 6. Python 3.12 + venv
+# 5. Python 3.12 + venv
 # ============================================
 RUN add-apt-repository -y ppa:deadsnakes/ppa && \
     apt-get update && \
@@ -152,45 +116,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-    numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg
+    numpy scipy pandas "anndata==0.12.3" scanpy h5py igraph leidenalg \
+    jupyter notebook matplotlib
 
 # ============================================
-# 7. convert2anndata（容错：失败不中断 build）
-# ============================================
-RUN R -e "library(remotes); \
-    tryCatch( \
-      install_github('settylab/convert2anndata', upgrade = 'never'), \
-      error = function(e) cat('WARNING: convert2anndata install failed:', conditionMessage(e), '\n') \
-    )"
-
-# ============================================
-# 8. easySCF (Python + R)（容错：失败不中断 build）
-# ============================================
-RUN pip install --no-cache-dir easySCFpy || echo "WARNING: easySCFpy install failed"
-
-RUN R -e "library(remotes); \
-    tryCatch( \
-      install_url('https://github.com/xleizi/easySCF/archive/refs/heads/main.tar.gz', subdir='r'), \
-      error = function(e) cat('WARNING: easySCFr install failed:', conditionMessage(e), '\n') \
-    )"
-
-# ============================================
-# 9. Zellkonverter + anndataR (Bioconductor)
-# ============================================
-RUN R -e "BiocManager::install(c('zellkonverter', 'HDF5Array'), ask = FALSE, update = FALSE)" && \
-    R -e "library(zellkonverter); cat('zellkonverter', as.character(packageVersion('zellkonverter')), 'OK\n')"
-
-RUN R -e "BiocManager::install('anndataR', ask = FALSE, update = FALSE)" && \
-    R -e "library(anndataR); cat('anndataR', as.character(packageVersion('anndataR')), 'OK\n')"
-
-# ============================================
-# 10. CrossCell 二进制文件
+# 6. CrossCell 二进制
 # ============================================
 COPY benchmark/crosscell /usr/local/bin/crosscell
 RUN chmod +x /usr/local/bin/crosscell
 
 # ============================================
-# 11. 目录和环境变量
+# 7. 目录和环境变量
 # ============================================
 RUN mkdir -p /benchmark/scripts /benchmark/data /benchmark/results
 
@@ -199,45 +135,15 @@ ENV BENCHMARK_RESULTS_DIR=/benchmark/results
 ENV R_LIBS_USER=/usr/local/lib/R/site-library
 
 # ============================================
-# 12. 配置 basilisk (zellkonverter)
+# 8. 验证基础环境
 # ============================================
-ENV BASILISK_USE_SYSTEM_DIR=1
-RUN PKGDIR=$(Rscript --slave -e "cat(system.file(package='zellkonverter'))") && \
-    mkdir -p "${PKGDIR}/basilisk" && \
-    ln -sf /opt/venv "${PKGDIR}/basilisk/zellkonverterAnnDataEnv-0.12.3" && \
-    echo "Created symlink at ${PKGDIR}/basilisk/zellkonverterAnnDataEnv-0.12.3 -> /opt/venv" && \
-    ls -la "${PKGDIR}/basilisk/"
-
-RUN ANNDATA_INIT=$(python3 -c "import anndata; print(anndata.__file__)") && \
-    echo '' >> "${ANNDATA_INIT}" && \
-    echo '# Auto-enable nullable strings writing (patched by CrossCell benchmark)' >> "${ANNDATA_INIT}" && \
-    echo 'try:' >> "${ANNDATA_INIT}" && \
-    echo '    settings.allow_write_nullable_strings = True' >> "${ANNDATA_INIT}" && \
-    echo 'except: pass' >> "${ANNDATA_INIT}" && \
-    python3 -c "import anndata; print('allow_write_nullable_strings:', anndata.settings.allow_write_nullable_strings)"
-
-# ============================================
-# 13. 安装 Jupyter + IRkernel
-# ============================================
-RUN pip install --no-cache-dir jupyter notebook matplotlib
-
-RUN R -e "install.packages('IRkernel'); IRkernel::installspec(user = FALSE)"
-
-# ============================================
-# 14. 验证关键安装（核心包必须成功，可选包仅警告）
-# ============================================
-RUN echo "=== Verifying CRITICAL installations ===" && \
+RUN echo "=== Verifying base environment ===" && \
     crosscell --version && \
-    R -e "library(Seurat); cat('✅ Seurat', as.character(packageVersion('Seurat')), '\n')" && \
-    R -e "library(zellkonverter); cat('✅ zellkonverter', as.character(packageVersion('zellkonverter')), '\n')" && \
-    R -e "library(anndataR); cat('✅ anndataR', as.character(packageVersion('anndataR')), '\n')" && \
-    R -e "library(rhdf5); cat('✅ rhdf5', as.character(packageVersion('rhdf5')), '\n')" && \
-    jupyter kernelspec list && \
-    echo "=== Critical packages OK ===" && \
-    echo "=== Checking optional packages ===" && \
-    R -e "tryCatch(library(convert2anndata), error = function(e) cat('⚠ convert2anndata not available\n'))" && \
-    R -e "tryCatch(library(easySCFr), error = function(e) cat('⚠ easySCFr not available\n'))" && \
-    echo "=== All verifications complete ==="
+    R --version | head -1 && \
+    python3 --version && \
+    python3 -c "import anndata; print('anndata', anndata.__version__)" && \
+    jupyter --version | head -3 && \
+    echo "=== Base environment OK ==="
 
 WORKDIR /benchmark
 
