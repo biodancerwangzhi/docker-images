@@ -51,7 +51,7 @@ git push -u origin main
 ```bash
 # 修改 Dockerfile 后提交
 git add .
-git commit -m "update: crosscell-benchmark dockerfile"
+git commit -m "update: crosscell-benchmark dockerfile:new 1"
 git push
 ```
 
@@ -59,8 +59,8 @@ git push
 
 ```bash
 # 打 tag 触发对应镜像的构建和推送
-git tag crosscell-benchmark/v1.0.1
-git push origin crosscell-benchmark/v1.0.1
+git tag crosscell-benchmark/v1.0.3
+git push origin crosscell-benchmark/v1.0.3
 ```
 
 ### 新增镜像
