@@ -89,12 +89,14 @@ RUN pip install --no-cache-dir pytest hypothesis
 
 # ============================================
 # 安装 R 包（easySCF, dior）
+# 直接从 tarball 安装，避免 GitHub API 限流
 # ============================================
 RUN R -e "install.packages('rlang', repos='https://cloud.r-project.org'); \
-          install.packages('remotes', repos='https://cloud.r-project.org'); \
-          options(download.file.method = 'libcurl'); \
-          remotes::install_github('xleizi/easySCF/r', upgrade = 'never', force = TRUE); \
-          remotes::install_github('JiekaiLab/dior', upgrade = 'never', force = TRUE)"
+          install.packages('remotes', repos='https://cloud.r-project.org')"
+
+# 从 GitHub release tarball 安装（不消耗 API 配额）
+RUN R -e "remotes::install_url('https://github.com/xleizi/easySCF/archive/refs/heads/master.tar.gz', subdir='r', upgrade='never')" && \
+    R -e "remotes::install_url('https://github.com/JiekaiLab/dior/archive/refs/heads/master.tar.gz', upgrade='never')"
 
 # ============================================
 # 环境变量
