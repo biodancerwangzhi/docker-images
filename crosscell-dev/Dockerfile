@@ -69,19 +69,23 @@ RUN rustup component add rustfmt clippy && \
 # ============================================
 # 安装 Python 科学计算库
 # ============================================
-RUN pip install --no-cache-dir \
-    numpy \
-    scipy \
-    pandas \
-    anndata \
-    scanpy \
-    igraph \
-    leidenalg \
-    scvelo \
-    diopy \
-    easySCFpy \
-    pytest \
-    hypothesis
+# 先升级 pip 和 setuptools（基础镜像的 Python 3.8 版本较旧）
+RUN pip install --upgrade pip setuptools wheel
+
+# 分步安装，避免依赖冲突
+RUN pip install --no-cache-dir numpy scipy pandas
+
+# 安装 igraph 和 leidenalg（指定版本避免构建问题）
+RUN pip install --no-cache-dir igraph leidenalg==0.10.2
+
+# 安装单细胞分析库
+RUN pip install --no-cache-dir anndata scanpy scvelo
+
+# 安装格式转换工具
+RUN pip install --no-cache-dir diopy easySCFpy
+
+# 安装测试工具
+RUN pip install --no-cache-dir pytest hypothesis
 
 # ============================================
 # 安装 R 包（easySCF, dior）
