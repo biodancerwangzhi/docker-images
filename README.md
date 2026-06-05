@@ -1,10 +1,10 @@
 # docker-images
 
-Monorepo for managing Docker images, built and pushed to Docker Hub via GitHub Actions.
+项目结构是通过 tag 名来决定构建哪个镜像，格式是 镜像名/v版本号。
 
 ## Structure
 
-Each directory contains a `Dockerfile` for one image:
+项目文件夹中包含一个 `Dockerfile` 
 
 ```
 crosscell-benchmark/Dockerfile  →  biodancer/crosscell-benchmark
@@ -25,13 +25,15 @@ crosscell-benchmark/Dockerfile  →  biodancer/crosscell-benchmark
 Tag with `<image-name>/v<version>` to trigger a build:
 
 ```bash
-git tag crosscell-benchmark/v1.0.1
-git push origin crosscell-benchmark/v1.0.1
+git tag crosscell-benchmark/v0.0.1
+git push origin crosscell-benchmark/v0.0.1
 ```
 
-This builds and pushes:
-- `biodancer/crosscell-benchmark:v1.0.1`
+这样构建并推送到dockerhub
+- `biodancer/crosscell-benchmark:v0.0.1`
 - `biodancer/crosscell-benchmark:latest`
+
+
 
 ## Git 操作
 
